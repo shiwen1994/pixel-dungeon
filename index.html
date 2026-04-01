@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="screen-orientation" content="portrait">
+<title>像素地牢</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a12;touch-action:none}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center}
+
+/* ── 顶部信息栏 ── */
+#hud{
+  position:fixed;top:0;left:0;right:0;
+  height:48px;
+  background:rgba(13,13,13,0.92);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;
+  font:bold 14px monospace;color:#e0e0e0;
+  z-index:100;
+  border-bottom:1px solid #2a2a3a;
+  flex-shrink:0;
+}
+.hud-left{display:flex;align-items:center;gap:12px}
+.hud-right{display:flex;align-items:center;gap:12px}
+.stat{display:flex;align-items:center;gap:4px;font-size:13px}
+.stat-icon{font-size:14px}
+#floor-stat{color:#ffe66d}
+
+/* ── Canvas 容器 ── */
+#canvas-wrap{
+  position:relative;
+  flex:1;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;
+  touch-action:none;
+}
+#c{
+  display:block;
+  image-rendering:pixelated;
+  image-rendering:crisp-edges;
+  cursor:crosshair;
+}
+
+/* ── 横屏遮罩 ── */
+#rotate-warn{
+  display:none;
+  position:fixed;inset:0;
+  background:#0a0a12;
+  z-index:9999;
+  flex-direction:column;
+  align-items:center;justify-content:center;
+  color:#e0e0e0;
+  font:bold 18px sans-serif;
+  gap:16px;
+}
+#rotate-warn .icon{font-size:48px}
+#rotate-warn .sub{font-size:14px;opacity:0.6}
+.rotate-icon{animation:rotate-hint 1.5s ease-in-out infinite}
+@keyframes rotate-hint{0%,100%{transform:rotate(0)}50%{transform:rotate(90deg)}}
+
+/* ── 底部 UI ── */
+#bottom-ui{
+  position:fixed;bottom:0;left:0;right:0;
+  flex-shrink:0;
+  z-index:100;
+}
+#item-bar{
+  display:flex;
+  height:64px;
+  background:rgba(13,13,13,0.95);
+  border-top:1px solid #2a2a3a;
+  padding:0 8px;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+}
+.item-slot{
+  width:52px;height:52px;
+  background:#1a1a28;
+  border:2px solid #2a2a3a;
+  border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:24px;
+  cursor:pointer;
+  transition:transform 80ms,border-color 150ms;
+  flex-shrink:0;
+}
+.item-slot:active{transform:scale(0.92);border-color:#ffe66d}
+.item-slot.empty{opacity:0.3}
+
+#skill-bar{
+  display:flex;
+  height:72px;
+  background:rgba(13,13,13,0.95);
+  border-top:1px solid #2a2a3a;
+  padding:0 12px;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+}
+.skill-btn{
+  width:56px;height:56px;
+  background:#1a1a28;
+  border:2px solid #9b59b6;
+  border-radius:12px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  cursor:pointer;
+  transition:transform 80ms,opacity 150ms;
+  position:relative;
+  overflow:hidden;
+}
+.skill-btn:active{transform:scale(0.93)}
+.skill-btn.disabled{opacity:0.35;border-color:#444}
+.skill-btn .icon{font-size:22px;line-height:1}
+.skill-btn .cd{
+  position:absolute;inset:0;
+  background:rgba(155,89,182,0.5);
+  display:none;
+}
+.skill-btn.on-cooldown .cd{display:block}
+.skill-label{font-size:9px;color:#aaa;margin-top:2px}
+
+#atk-btn{
+  width:64px;height:64px;
+  background:#2a1010;
+  border:3px solid #c0392b;
+  border-radius:50%;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  cursor:pointer;
+  transition:transform 80ms,background 150ms;
+  flex-shrink:0;
+  margin-left:8px;
+}
+#atk-btn:active{transform:scale(0.9);background:#5a2020}
+#atk-btn .atk-label{font-size:9px;color:#ff6b6b;margin-top:2px}
+
+/* ── 升级提示 ── */
+#upgrade-toast{
+  display:none;
+  position:fixed;top:60px;left:50%;transform:translateX(-50%);
+  background:rgba(240,184,64,0.95);
+  color:#1a1a2e;
+  font:bold 14px sans-serif;
+  padding:8px 20px;border-radius:20px;
+  z-index:200;
+  pointer-events:none;
+  white-space:nowrap;
+}
+
+/* ── 受伤红边 ── */
+#dmg-vignette{
+  display:none;
+  position:fixed;inset:0;
+  pointer-events:none;z-index:90;
+  box-shadow:inset 0 0 80px rgba(192,57,43,0.7);
+  animation:dmg-flash 0.3s ease-out forwards;
+}
+@keyframes dmg-flash{0%{opacity:1}100%{opacity:0}}
+
+/* ── 加载提示 ── */
+#loading{
+  position:fixed;inset:0;
+  background:#0a0a12;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  z-index:999;
+  color:#e0e0e0;
+  font:16px sans-serif;
+}
+#loading .dots::after{content:'';animation:dots 1.2s steps(4) infinite}
+@keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+#loading .tip{margin-top:12px;font-size:12px;opacity:0.4}
+</style>
+</head>
+<body>
+
+<!-- 顶部 HUD -->
+<div id="hud">
+  <div class="hud-left">
+    <div class="stat"><span class="stat-icon">❤️</span><span id="hp-val">100</span></div>
+    <div class="stat"><span class="stat-icon">⚡</span><span id="mp-val">5</span></div>
+  </div>
+  <div class="stat" id="floor-stat">第 <span id="floor-num">1</span> 层</div>
+  <div class="hud-right">
+    <div class="stat"><span class="stat-icon">💰</span><span id="gold-val">0</span></div>
+    <div class="stat"><span class="stat-icon">⚔️</span><span id="kill-val">0</span></div>
+  </div>
+</div>
+
+<!-- 游戏画布 -->
+<div id="canvas-wrap">
+  <canvas id="c"></canvas>
+</div>
+
+<!-- 横屏警告 -->
+<div id="rotate-warn">
+  <div class="icon rotate-icon">📱</div>
+  <div>请旋转设备</div>
+  <div class="sub">此页面仅支持竖屏</div>
+</div>
+
+<!-- 底部道具栏 -->
+<div id="item-bar">
+  <div class="item-slot empty" id="slot-0"></div>
+  <div class="item-slot empty" id="slot-1"></div>
+  <div class="item-slot empty" id="slot-2"></div>
+  <div class="item-slot empty" id="slot-3"></div>
+</div>
+
+<!-- 底部技能栏 -->
+<div id="skill-bar">
+  <div class="skill-btn disabled" id="skill-0"><span class="icon">🔥</span><span class="skill-label">火球</span><div class="cd"></div></div>
+  <div class="skill-btn disabled" id="skill-1"><span class="icon">🛡️</span><span class="skill-label">护盾</span><div class="cd"></div></div>
+  <div class="skill-btn disabled" id="skill-2"><span class="icon">💨</span><span class="skill-label">治疗</span><div class="cd"></div></div>
+  <div id="atk-btn"><span style="font-size:22px">⚔️</span><span class="atk-label">普攻</span></div>
+</div>
+
+<!-- 升级提示 -->
+<div id="upgrade-toast">⬆️ 升级！</div>
+
+<!-- 受伤红边 -->
+<div id="dmg-vignette"></div>
+
+<!-- 加载遮罩（JS控制关闭） -->
+<div id="loading">
+  <div>加载中<span class="dots"></span></div>
+  <div class="tip">像素地牢 · 竖屏版</div>
+</div>
+
+<script>
+'use strict';
+// ═══════════════════════════════════════
+// 常量
+// ═══════════════════════════════════════
+const T     = 16;
+const SCALE = 3;
+const PW    = 20;
+const PH    = 14;
+const CW    = PW * T * SCALE;
+const CH    = PH * T * SCALE;
+
+const PLAYER_SPEED = 3;
+const ATK_RANGE    = T * SCALE * 2.5;
+const ATK_COOLDOWN = 30;
+const MONSTER_SPD  = 1.2;
+
+const WALL  = 0;
+const FLOOR = 1;
+const EXIT  = 3;
+const TILE_COLORS = {
+  [WALL]:  '#1a1a2e',
+  [FLOOR]: '#2d2d44',
+  [EXIT]:  '#2ecc71',
+};
+
+const C = {
+  player:  '#4ecdc4',
+  monster: '#ff6b6b',
+  gold:    '#ffe66d',
+  blood:   '#c0392b',
+  skill:   '#9b59b6',
+  chest:   '#f39c12',
+};
+
+const FLOOR_THEMES = [
+  {wall:'#1a1a2e', floor:'#2d2d44', name:'暗紫地牢'},
+  {wall:'#3a3a4a', floor:'#5a5a6a', name:'灰白遗迹'},
+  {wall:'#1a2a1a', floor:'#2a3a2a', name:'灰绿毒沼'},
+  {wall:'#2a1a0a', floor:'#4a2a1a', name:'灰橙熔岩'},
+];
+
+// ═══════════════════════════════════════
+// 状态
+// ═══════════════════════════════════════
+const S = {
+  W: window.innerWidth, H: window.innerHeight,
+  px:0, py:0, pdx:0, pdy:0, pdir:'down',
+  php:100, pmaxHp:100, pmp:5, pmaxMp:5, patk:20, pdef:0,
+  atkCd:0,
+  gold:0, kills:0, floor:1, level:1, exp:0, expNext:10,
+  skills:[], skillCds:[],
+  items:[],
+  weapon:null, armor:null, accessory:null,
+  relics:[],
+  map:[], rooms:[], monsters:[], objects:[],
+  phase:'loading', frame:0,
+};
+
+// ═══════════════════════════════════════
+// Canvas
+// ═══════════════════════════════════════
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+function resizeCanvas() {
+  const availH = window.innerHeight - 48 - 64 - 72;
+  const availW = window.innerWidth;
+  const scale  = Math.min(availW / CW, availH / CH);
+  canvas.style.width  = (CW * scale) + 'px';
+  canvas.style.height = (CH * scale) + 'px';
+  canvas.width  = CW;
+  canvas.height = CH;
+}
+
+function checkRotation() {
+  document.getElementById('rotate-warn').style.display =
+    window.innerWidth > window.innerHeight ? 'flex' : 'none';
+}
+
+window.addEventListener('resize', ()=>{ resizeCanvas(); checkRotation(); });
+
+// ═══════════════════════════════════════
+// 输入
+// ═══════════════════════════════════════
+function canvasPos(e) {
+  const r = canvas.getBoundingClientRect();
+  const sx = CW / r.width;
+  const sy = CH / r.height;
+  const touch = e.touches ? e.touches[0] : e;
+  return { x:(touch.clientX-r.left)*sx, y:(touch.clientY-r.top)*sy };
+}
+
+canvas.addEventListener('click', e=>{
+  if(S.phase!=='play') return;
+  const {x,y}=canvasPos(e);
+  S.pdx=x; S.pdy=y;
+});
+canvas.addEventListener('touchend', e=>{
+  if(S.phase!=='play') return;
+  e.preventDefault();
+  const {x,y}=canvasPos(e);
+  S.pdx=x; S.pdy=y;
+},{passive:false});
+
+window.addEventListener('keydown', e=>{
+  if(S.phase!=='play') return;
+  const spd=T*SCALE;
+  switch(e.key){
+    case 'w':case 'ArrowUp':   S.pdx=S.px;  S.pdy=S.py-spd; S.pdir='up';    break;
+    case 's':case 'ArrowDown': S.pdx=S.px;  S.pdy=S.py+spd; S.pdir='down';  break;
+    case 'a':case 'ArrowLeft': S.pdx=S.px-spd; S.pdy=S.py; S.pdir='left';  break;
+    case 'd':case 'ArrowRight':S.pdx=S.px+spd; S.pdy=S.py; S.pdir='right'; break;
+  }
+});
+
+document.querySelectorAll('.skill-btn').forEach((btn,i)=>{ btn.addEventListener('click',()=>useSkill(i)); });
+document.getElementById('atk-btn').addEventListener('click',()=>manualAtk());
+
+// ═══════════════════════════════════════
+// 地图
+// ═══════════════════════════════════════
+function theme() {
+  const idx = Math.min((S.floor-1) % FLOOR_THEMES.length, FLOOR_THEMES.length-1);
+  return FLOOR_THEMES[idx];
+}
+
+function generateFloor() {
+  S.map = Array.from({length:PH}, ()=>Array(PW).fill(WALL));
+  S.rooms=[]; S.monsters=[]; S.objects=[];
+
+  const count = 5+Math.floor(Math.random()*3);
+  for(let i=0;i<count;i++){
+    const rw=4+Math.floor(Math.random()*4), rh=3+Math.floor(Math.random()*3);
+    const rx=1+Math.floor(Math.random()*(PW-rw-2));
+    const ry=1+Math.floor(Math.random()*(PH-rh-2));
+    let ok=true;
+    for(const r of S.rooms){
+      if(rx<r.x+r.w+1&&rx+rw+1>r.x&&ry<r.y+r.h+1&&ry+rh+1>r.y){ok=false;break;}
+    }
+    if(!ok) continue;
+    S.rooms.push({x:rx,y:ry,w:rw,h:rh});
+    for(let gy=ry;gy<ry+rh;gy++)
+      for(let gx=rx;gx<rx+rw;gx++)
+        S.map[gy][gx]=FLOOR;
+  }
+
+  if(S.rooms.length===0){
+    S.rooms.push({x:8,y:6,w:4,h:3});
+    for(let gy=6;gy<9;gy++) for(let gx=8;gx<12;gx++) S.map[gy][gx]=FLOOR;
+  }
+
+  // 走廊
+  for(let i=0;i<S.rooms.length-1;i++){
+    const a=S.rooms[i],b=S.rooms[i+1];
+    const ax=Math.floor(a.x+a.w/2),ay=Math.floor(a.y+a.h/2);
+    const bx=Math.floor(b.x+b.w/2),by=Math.floor(b.y+b.h/2);
+    for(let x=Math.min(ax,bx);x<=Math.max(ax,bx);x++) S.map[ay][x]=FLOOR;
+    for(let y=Math.min(ay,by);y<=Math.max(ay,by);y++) S.map[y][ax]=FLOOR;
+  }
+
+  // 玩家位置
+  const r0=S.rooms[0];
+  S.px=(r0.x+Math.floor(r0.w/2))*T*SCALE;
+  S.py=(r0.y+Math.floor(r0.h/2))*T*SCALE;
+  S.pdx=S.px; S.pdy=S.py;
+
+  // EXIT
+  const rl=S.rooms[S.rooms.length-1];
+  S.map[Math.floor(rl.y+rl.h/2)][Math.floor(rl.x+rl.w/2)]=EXIT;
+
+  // 怪物
+  for(let i=0;i<S.rooms.length-1;i++){
+    const r=S.rooms[i];
+    const cnt=2+Math.floor(Math.random()*3);
+    for(let k=0;k<cnt;k++){
+      spawnMonster(
+        (r.x+1+Math.floor(Math.random()*(r.w-2)))*T*SCALE,
+        (r.y+1+Math.floor(Math.random()*(r.h-2)))*T*SCALE
+      );
+    }
+  }
+
+  // 宝箱
+  for(let i=1;i<S.rooms.length-1;i++){
+    if(Math.random()<0.4){
+      const r=S.rooms[i];
+      S.objects.push({type:'chest',
+        x:(r.x+1+Math.floor(Math.random()*(r.w-2)))*T*SCALE,
+        y:(r.y+1+Math.floor(Math.random()*(r.h-2)))*T*SCALE,
+        gold:5+S.floor*3+Math.floor(Math.random()*10)
+      });
+    }
+  }
+}
+
+function spawnMonster(x,y) {
+  const types=[
+    {name:'史莱姆',hp:20,atk:5,spd:0.8,size:12,color:'#3cb371'},
+    {name:'骷髅',  hp:35,atk:8,spd:1.0,size:14,color:'#e8e8e8'},
+    {name:'蝙蝠',  hp:12,atk:6,spd:1.8,size:10,color:'#ff6b6b'},
+    {name:'哥布林',hp:28,atk:10,spd:1.2,size:13,color:'#6aaa3c'},
+    {name:'蜘蛛',  hp:30,atk:9,spd:1.4,size:14,color:'#4a4a4a'},
+  ];
+  const t=types[Math.floor(Math.random()*types.length)];
+  const scaleHp=1+(S.floor-1)*0.2, scaleAtk=1+(S.floor-1)*0.15;
+  S.monsters.push({
+    x,y,
+    hp:Math.floor(t.hp*scaleHp), maxHp:Math.floor(t.hp*scaleHp),
+    atk:Math.floor(t.atk*scaleAtk),
+    spd:t.spd*MONSTER_SPD, size:t.size, color:t.color, name:t.name,
+    hitFlash:0,
+  });
+}
+
+// ═══════════════════════════════════════
+// 碰撞
+// ═══════════════════════════════════════
+function tileAt(px,py) {
+  const tx=Math.floor(px/(T*SCALE)), ty=Math.floor(py/(T*SCALE));
+  if(tx<0||ty<0||tx>=PW||ty>=PH) return WALL;
+  return S.map[ty][tx];
+}
+function canMove(px,py) {
+  const s=6;
+  return tileAt(px+s,py+s)!==WALL &&
+         tileAt(px+T*SCALE-s,py+s)!==WALL &&
+         tileAt(px+s,py+T*SCALE-s)!==WALL &&
+         tileAt(px+T*SCALE-s,py+T*SCALE-s)!==WALL;
+}
+
+// ═══════════════════════════════════════
+// 游戏逻辑
+// ═══════════════════════════════════════
+function update() {
+  if(S.phase!=='play') return;
+  S.frame++;
+
+  // 移动
+  const dx=S.pdx-S.px, dy=S.pdy-S.py;
+  const dist=Math.sqrt(dx*dx+dy*dy);
+  if(dist>PLAYER_SPEED){
+    const nx=S.px+(dx/dist)*PLAYER_SPEED;
+    const ny=S.py+(dy/dist)*PLAYER_SPEED;
+    if(canMove(nx,S.py)) S.px=nx;
+    if(canMove(S.px,ny)) S.py=ny;
+  }
+  if(Math.abs(dx)>Math.abs(dy)) S.pdir=dx>0?'right':'left';
+  else if(Math.abs(dy)>1) S.pdir=dy>0?'down':'up';
+
+  // 攻击冷却
+  if(S.atkCd>0) S.atkCd--;
+  for(let i=0;i<S.skillCds.length;i++) if(S.skillCds[i]>0) S.skillCds[i]--;
+
+  // 自动攻击
+  if(S.atkCd===0){
+    for(const m of S.monsters){
+      const edx=m.x-S.px,edy=m.y-S.py;
+      if(Math.sqrt(edx*edx+edy*edy)<ATK_RANGE+m.size){
+        playerAtk(m); break;
+      }
+    }
+  }
+
+  // 怪物AI
+  for(const m of S.monsters){
+    if(m.hitFlash>0) m.hitFlash--;
+    const edx=S.px-m.x,edy=S.py-m.y;
+    const ed=Math.sqrt(edx*edx+edy*edy);
+    if(ed>T*SCALE*0.8){
+      const nx=m.x+(edx/ed)*m.spd;
+      const ny=m.y+(edy/ed)*m.spd;
+      if(canMove(nx,m.y)) m.x=nx;
+      if(canMove(m.x,ny)) m.y=ny;
+    } else {
+      playerTakeDamage(m.atk);
+      m.x-=(edx/ed)*4; m.y-=(edy/ed)*4;
+    }
+  }
+
+  // 拾取
+  for(let i=S.objects.length-1;i>=0;i--){
+    const o=S.objects[i];
+    const odx=o.x-S.px,ody=o.y-S.py;
+    if(Math.sqrt(odx*odx+ody*ody)<T*SCALE){
+      if(o.type==='chest'){
+        S.gold+=o.gold;
+        S.objects.splice(i,1);
+        showToast(`+${o.gold}💰`);
+      }
+    }
+  }
+
+  // EXIT
+  const tx=Math.floor(S.px/(T*SCALE)), ty=Math.floor(S.py/(T*SCALE));
+  if(tx>=0&&ty>=0&&tx<PW&&ty<PH&&S.map[ty][tx]===EXIT){
+    nextFloor();
+  }
+
+  updateSkillUI();
+}
+
+function playerAtk(m) {
+  const atkVal=S.patk+(S.weapon?S.weapon.atk:0);
+  m.hp-=atkVal; m.hitFlash=6; S.atkCd=ATK_COOLDOWN;
+  if(m.hp<=0){
+    const idx=S.monsters.indexOf(m);
+    if(idx!==-1){
+      S.monsters.splice(idx,1);
+      const g=3+Math.floor(Math.random()*5)+S.floor*2;
+      S.gold+=g; S.kills++;
+      addExp(3);
+      showToast(`击杀！+${g}💰`);
+    }
+  }
+  updateHUD();
+}
+
+function manualAtk() {
+  if(S.phase!=='play') return;
+  let nearest=null, nd=Infinity;
+  for(const m of S.monsters){
+    const d=Math.sqrt((m.x-S.px)**2+(m.y-S.py)**2);
+    if(d<nd){nd=d;nearest=m;}
+  }
+  if(nearest&&nd<ATK_RANGE*2){ S.pdx=S.px;S.pdy=S.py; playerAtk(nearest); }
+}
+
+function useSkill(i) {
+  if(S.phase!=='play') return;
+  const sk=S.skills[i];
+  if(!sk||S.skillCds[i]>0||S.pmp<sk.mp) return;
+  S.pmp-=sk.mp; S.skillCds[i]=sk.cd;
+  if(sk.id==='fireball'){
+    let nearest=null,nd=Infinity;
+    for(const m of S.monsters){
+      const d=Math.sqrt((m.x-S.px)**2+(m.y-S.py)**2);
+      if(d<nd){nd=d;nearest=m;}
+    }
+    if(nearest){
+      const dmg=30+S.level*5;
+      for(const m of S.monsters){
+        const d=Math.sqrt((m.x-nearest.x)**2+(m.y-nearest.y)**2);
+        if(d<T*SCALE*2){
+          m.hp-=dmg; m.hitFlash=8;
+          if(m.hp<=0){
+            const idx=S.monsters.indexOf(m);
+            if(idx!==-1){S.monsters.splice(idx,1);S.kills++;S.gold+=5+S.floor*2;}
+          }
+        }
+      }
+      showToast('🔥 火球！');
+    }
+  } else if(sk.id==='shield'){
+    S.pdef+=10+S.level;
+    showToast('🛡️ 护盾！');
+  } else if(sk.id==='heal'){
+    const heal=20+S.level*5;
+    S.php=Math.min(S.pmaxHp,S.php+heal);
+    showToast(`💨 +${heal}HP`);
+  }
+  updateHUD();
+}
+
+function addExp(n) {
+  S.exp+=n;
+  if(S.exp>=S.expNext){
+    S.level++; S.exp=0; S.expNext=Math.floor(S.expNext*1.5);
+    S.pmaxHp+=10; S.php=S.pmaxHp;
+    S.pmaxMp+=1;  S.pmp=S.pmaxMp;
+    S.patk+=3;
+    if(S.level===2&&S.skills.length<1) S.skills.push({id:'fireball',mp:2,cd:60,name:'火球'});
+    if(S.level===5&&S.skills.length<2) S.skills.push({id:'shield',mp:1,cd:90,name:'护盾'});
+    if(S.level===8&&S.skills.length<3) S.skills.push({id:'heal',mp:3,cd:120,name:'治疗'});
+    S.skillCds=S.skills.map(()=>0);
+    updateSkillUI();
+    showToast('⬆️ 升级！');
+    flashUpgrade();
+  }
+}
+
+function playerTakeDamage(dmg) {
+  const def=S.pdef+(S.armor?S.armor.def:0);
+  const final=Math.max(1,dmg-def);
+  S.php-=final;
+  showDmgVignette();
+  updateHUD();
+  if(S.php<=0) gameOver();
+}
+
+function nextFloor() {
+  S.floor++;
+  showToast(`第 ${S.floor} 层`);
+  generateFloor();
+  updateHUD();
+}
+
+// ═══════════════════════════════════════
+// 死亡
+// ═══════════════════════════════════════
+function gameOver() {
+  S.phase='dead';
+  const saved=loadSave();
+  saved.totalGold=(saved.totalGold||0)+S.gold;
+  saved.highestFloor=Math.max(saved.highestFloor||1,S.floor);
+  saveGame(saved);
+  const ov=document.createElement('div');
+  ov.style.cssText=`position:fixed;inset:0;background:rgba(10,10,18,0.92);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    z-index:500;color:#e0e0e0;gap:16px;`;
+  ov.innerHTML=`
+    <div style="font:bold 28px sans-serif;color:#ff6b6b">你死了</div>
+    <div style="font:16px;opacity:0.7">第 ${S.floor} 层 · ${S.kills} 次击杀</div>
+    <div style="font:bold 20px;color:#ffe66d">+${S.gold} 💰 已存入局外</div>
+    <div style="font:13px;opacity:0.4">局外金币：${saved.totalGold}</div>
+    <button id="replay-btn" style="margin-top:8px;background:#2ecc71;color:#fff;border:none;
+      font:bold 16px sans-serif;padding:12px 36px;border-radius:24px;cursor:pointer;
+    ">再来一局</button>
+  `;
+  document.body.appendChild(ov);
+  document.getElementById('replay-btn').onclick=()=>{ov.remove();startGame();};
+}
+
+// ═══════════════════════════════════════
+// 存档
+// ═══════════════════════════════════════
+const SAVE_KEY='pixel_dungeon_v1';
+function saveGame(d){try{localStorage.setItem(SAVE_KEY,JSON.stringify(d));}catch(e){}}
+function loadSave(){try{return JSON.parse(localStorage.getItem(SAVE_KEY)||'{}');}catch(e){return{};}}
+
+// ═══════════════════════════════════════
+// UI
+// ═══════════════════════════════════════
+function updateHUD() {
+  document.getElementById('hp-val').textContent=Math.max(0,S.php);
+  document.getElementById('mp-val').textContent=S.pmp;
+  document.getElementById('gold-val').textContent=S.gold;
+  document.getElementById('kill-val').textContent=S.kills;
+  document.getElementById('floor-num').textContent=S.floor;
+}
+
+function updateSkillUI() {
+  const btns=document.querySelectorAll('.skill-btn');
+  btns.forEach((btn,i)=>{
+    if(i<S.skills.length){
+      btn.classList.remove('disabled');
+      const cd=S.skillCds[i]||0, sk=S.skills[i];
+      if(cd>0){
+        btn.classList.add('on-cooldown');
+        btn.querySelector('.cd').style.height=(cd/sk.cd*100)+'%';
+        btn.querySelector('.cd').style.display='block';
+      } else {
+        btn.classList.remove('on-cooldown');
+        btn.querySelector('.cd').style.display='none';
+      }
+    } else {
+      btn.classList.add('disabled');
+    }
+  });
+}
+
+let toastTimer=null;
+function showToast(msg){
+  const el=document.getElementById('upgrade-toast');
+  el.textContent=msg;
+  el.style.display='block';
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{el.style.display='none';},2000);
+}
+
+function flashUpgrade(){
+  const el=document.createElement('div');
+  el.style.cssText=`position:fixed;inset:0;pointer-events:none;z-index:90;
+    background:rgba(240,184,64,0.3);animation:flash-up 0.4s ease-out forwards;`;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(),400);
+}
+
+function showDmgVignette(){
+  const el=document.getElementById('dmg-vignette');
+  el.style.display='block';
+  el.style.animation='none';
+  void el.offsetWidth;
+  el.style.animation='dmg-flash 0.3s ease-out forwards';
+  setTimeout(()=>{el.style.display='none';},300);
+}
+
+// ═══════════════════════════════════════
+// 渲染
+// ═══════════════════════════════════════
+function render() {
+  const th=theme();
+  ctx.clearRect(0,0,CW,CH);
+
+  // 背景
+  ctx.fillStyle='#0a0a12';
+  ctx.fillRect(0,0,CW,CH);
+
+  // Tiles
+  for(let y=0;y<PH;y++){
+    for(let x=0;x<PW;x++){
+      const tile=S.map[y][x];
+      const px=x*T*SCALE, py=y*T*SCALE;
+      ctx.fillStyle=tile===WALL?th.wall:tile===EXIT?C.gold:th.floor;
+      ctx.fillRect(px,py,T*SCALE,T*SCALE);
+      if(tile===WALL){
+        // 墙砖纹理
+        ctx.fillStyle='rgba(0,0,0,0.15)';
+        ctx.fillRect(px,py,T*SCALE,1);
+        ctx.fillRect(px,py,1,T*SCALE);
+      }
+      if(tile===EXIT){
+        // EXIT 光效
+        ctx.fillStyle='rgba(46,204,113,0.3)';
+        ctx.fillRect(px+T*SCALE*0.2,py+T*SCALE*0.2,T*SCALE*0.6,T*SCALE*0.6);
+        const pulse=Math.sin(S.frame*0.08)*0.3+0.7;
+        ctx.fillStyle=`rgba(46,204,113,${pulse*0.5})`;
+        ctx.fillRect(px+T*SCALE*0.3,py+T*SCALE*0.3,T*SCALE*0.4,T*SCALE*0.4);
+      }
+    }
+  }
+
+  // 宝箱
+  for(const o of S.objects){
+    if(o.type==='chest'){
+      ctx.fillStyle=C.chest;
+      ctx.fillRect(o.x-6,o.y-6,12,12);
+      ctx.fillStyle='#0d0d0d';
+      ctx.fillRect(o.x-6,o.y-2,12,3);
+      ctx.fillStyle='#ffe66d';
+      ctx.fillRect(o.x-2,o.y-3,4,4);
+    }
+  }
+
+  // 怪物
+  for(const m of S.monsters){
+    ctx.fillStyle=m.hitFlash>0?'#ffffff':m.color;
+    ctx.fillRect(m.x-m.size,m.y-m.size,m.size*2,m.size*2);
+    // 眼睛
+    ctx.fillStyle='#0d0d0d';
+    ctx.fillRect(m.x-3,m.y-3,2,2);
+    ctx.fillRect(m.x+1,m.y-3,2,2);
+    // 血条
+    const bw=m.size*2, bh=3;
+    const bx=m.x-m.size, by=m.y-m.size-6;
+    ctx.fillStyle='#333';
+    ctx.fillRect(bx,by,bw,bh);
+    ctx.fillStyle=m.hp/m.maxHp>0.5?C.gold:m.hp/m.maxHp>0.25?'#f39c12':'#c0392b';
+    ctx.fillRect(bx,by,bw*(m.hp/m.maxHp),bh);
+  }
+
+  // 玩家
+  ctx.fillStyle=C.player;
+  ctx.fillRect(S.px-T*SCALE/2,S.py-T*SCALE/2,T*SCALE,T*SCALE);
+  // 眼睛（根据朝向）
+  ctx.fillStyle='#0d0d0d';
+  const ex=T*SCALE/6, ey=T*SCALE/6;
+  if(S.pdir==='down'){
+    ctx.fillRect(S.px-ex,S.py,ex,ey);
+    ctx.fillRect(S.px+ex/2,S.py,ex,ey);
+  } else if(S.pdir==='up'){
+    // 背面无表情
+  } else if(S.pdir==='left'){
+    ctx.fillRect(S.px-T*SCALE/2,S.py,ex,ey);
+  } else {
+    ctx.fillRect(S.px+T*SCALE/2-ex,S.py,ex,ey);
+  }
+  // 攻击范围指示（攻
+  if(S.atkCd>ATK_COOLDOWN-5){
+    ctx.strokeStyle='rgba(255,100,100,0.3)';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.arc(S.px,S.py,ATK_RANGE,0,Math.PI*2);
+    ctx.stroke();
+  }
+}
+
+// ═══════════════════════════════════════
+// 游戏循环
+// ═══════════════════════════════════════
+function loop() {
+  update();
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════
+// 启动
+// ═══════════════════════════════════════
+function startGame() {
+  S.px=0; S.py=0; S.pdx=0; S.pdy=0; S.pdir='down';
+  S.php=100; S.pmaxHp=100; S.pmp=5; S.pmaxMp=5; S.patk=20; S.pdef=0;
+  S.atkCd=0;
+  S.gold=0; S.kills=0; S.floor=1; S.level=1; S.exp=0; S.expNext=10;
+  S.skills=[]; S.skillCds=[];
+  S.weapon=null; S.armor=null; S.accessory=null;
+  S.relics=[];
+  S.phase='play';
+  generateFloor();
+  updateHUD();
+  updateSkillUI();
+}
+
+function init() {
+  resizeCanvas();
+  checkRotation();
+  // 移除加载遮罩
+  const loading=document.getElementById('loading');
+  if(loading) loading.style.display='none';
+  startGame();
+  loop();
+}
+
+// CSS动画（动态注入）
+const style=document.createElement('style');
+style.textContent=`
+@keyframes dmg-flash{0%{opacity:1}100%{opacity:0}}
+@keyframes flash-up{0%{opacity:0.3}100%{opacity:0}}
+`;
+document.head.appendChild(style);
+
+// 等待DOM加载
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',init);
+} else {
+  init();
+}
+</script>
+</body>
+</html>
